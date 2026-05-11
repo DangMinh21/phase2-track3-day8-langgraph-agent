@@ -230,22 +230,40 @@ graph.invoke(None, config=snapshot.config)  # replay từ checkpoint bất kỳ
 
 ### 4.1 Kết quả 7 Scenarios
 
-✅ **Tổng quan:** 7 scenarios | Success rate: **100%** | Avg nodes: **36.4** | Total retries: **15** | Total HITL interrupts: **10** | Resume success: **✓**
+✅ **Tổng quan:** 22 scenarios | Success rate: **100%** | Avg nodes: **19.1** | Total retries: **23** | Total HITL interrupts: **17** | Resume success: **✓**
 
 | Scenario | Query tóm tắt | Expected | Actual | Kết quả | Nodes | Retries | Approval | Latency |
 |---|---|:---:|:---:|:---:|---:|---:|:---:|---:|
-| **S01_simple** | How do I reset my password? | `simple` | `simple` | ✓ Pass | 20 | 0 | — | 221ms |
-| **S02_tool** | Lookup order status for order 12345 | `tool` | `tool` | ✓ Pass | 40 | 0 | — | 7ms |
-| **S03_missing** | Can you fix it? | `missing_info` | `missing_info` | ✓ Pass | 20 | 0 | — | 5ms |
-| **S04_risky** | Refund this customer and send email | `risky` | `risky` | ✓ Pass | 50 | 0 | ✓ | 7ms |
-| **S05_error** | Timeout failure while processing | `error` | `error` | ✓ Pass | 50 | 10 | — | 7ms |
-| **S06_delete** | Delete customer account after verification | `risky` | `risky` | ✓ Pass | 50 | 0 | ✓ | 7ms |
-| **S07_dead_letter** | System failure cannot recover | `error` | `error` | ✓ Pass | 25 | 5 | — | 3ms |
+| **S01_simple** | How do I reset my password? | `simple` | `simple` | ✓ Pass | 24 | 0 | — | 217ms |
+| **S02_tool** | Lookup order status for order 12345 | `tool` | `tool` | ✓ Pass | 48 | 0 | — | 5ms |
+| **S03_missing** | Can you fix it? | `missing_info` | `missing_info` | ✓ Pass | 24 | 0 | — | 4ms |
+| **S04_risky** | Refund this customer and send email | `risky` | `risky` | ✓ Pass | 60 | 0 | ✓ | 6ms |
+| **S05_error** | Timeout failure while processing | `error` | `error` | ✓ Pass | 60 | 12 | — | 6ms |
+| **S06_delete** | Delete customer account after verification | `risky` | `risky` | ✓ Pass | 60 | 0 | ✓ | 6ms |
+| **S07_dead_letter** | System failure cannot recover | `error` | `error` | ✓ Pass | 30 | 6 | — | 3ms |
+| **G01_simple** | — | `simple` | `simple` | ✓ Pass | 4 | 0 | — | 3ms |
+| **G02_simple2** | — | `simple` | `simple` | ✓ Pass | 4 | 0 | — | 3ms |
+| **G03_tool** | — | `tool` | `tool` | ✓ Pass | 8 | 0 | — | 4ms |
+| **G04_tool2** | — | `tool` | `tool` | ✓ Pass | 8 | 0 | — | 5ms |
+| **G05_tool3** | — | `tool` | `tool` | ✓ Pass | 8 | 0 | — | 5ms |
+| **G06_missing** | — | `missing_info` | `missing_info` | ✓ Pass | 4 | 0 | — | 4ms |
+| **G07_missing2** | — | `missing_info` | `missing_info` | ✓ Pass | 4 | 0 | — | 3ms |
+| **G08_risky** | — | `risky` | `risky` | ✓ Pass | 10 | 0 | ✓ | 4ms |
+| **G09_risky2** | — | `risky` | `risky` | ✓ Pass | 10 | 0 | ✓ | 5ms |
+| **G10_risky3** | — | `risky` | `risky` | ✓ Pass | 10 | 0 | ✓ | 4ms |
+| **G11_risky4** | — | `risky` | `risky` | ✓ Pass | 10 | 0 | ✓ | 5ms |
+| **G12_error** | — | `error` | `error` | ✓ Pass | 10 | 2 | — | 4ms |
+| **G13_error2** | — | `error` | `error` | ✓ Pass | 10 | 2 | — | 4ms |
+| **G14_dead** | — | `error` | `error` | ✓ Pass | 5 | 1 | — | 2ms |
+| **G15_mixed** | — | `risky` | `risky` | ✓ Pass | 10 | 0 | ✓ | 4ms |
 
 ### 4.2 Phân tích Retry
 
-- **S05_error**: 10 lần retry, errors ghi nhận: 10 event
-- **S07_dead_letter**: 5 lần retry, errors ghi nhận: 5 event
+- **S05_error**: 12 lần retry, errors ghi nhận: 12 event
+- **S07_dead_letter**: 6 lần retry, errors ghi nhận: 6 event
+- **G12_error**: 2 lần retry, errors ghi nhận: 2 event
+- **G13_error2**: 2 lần retry, errors ghi nhận: 2 event
+- **G14_dead**: 1 lần retry, errors ghi nhận: 1 event
 
 **Cơ chế hoạt động:**
 - `evaluate_node` kiểm tra `tool_results` — nếu rỗng hoặc chứa "error" → `evaluation_result = "needs_retry"`
@@ -254,22 +272,37 @@ graph.invoke(None, config=snapshot.config)  # replay từ checkpoint bất kỳ
 
 ### 4.3 Phân tích Latency
 
-- **S01_simple**: 221ms — dùng OpenAI LLM classify (gpt-4o-mini)
-- **S02_tool**: 7ms — keyword fallback (< 10ms)
-- **S03_missing**: 5ms — keyword fallback (< 10ms)
-- **S04_risky**: 7ms — keyword fallback (< 10ms)
-- **S05_error**: 7ms — keyword fallback (< 10ms)
-- **S06_delete**: 7ms — keyword fallback (< 10ms)
+- **S01_simple**: 217ms — dùng OpenAI LLM classify (gpt-4o-mini)
+- **S02_tool**: 5ms — keyword fallback (< 10ms)
+- **S03_missing**: 4ms — keyword fallback (< 10ms)
+- **S04_risky**: 6ms — keyword fallback (< 10ms)
+- **S05_error**: 6ms — keyword fallback (< 10ms)
+- **S06_delete**: 6ms — keyword fallback (< 10ms)
 - **S07_dead_letter**: 3ms — keyword fallback (< 10ms)
+- **G01_simple**: 3ms — keyword fallback (< 10ms)
+- **G02_simple2**: 3ms — keyword fallback (< 10ms)
+- **G03_tool**: 4ms — keyword fallback (< 10ms)
+- **G04_tool2**: 5ms — keyword fallback (< 10ms)
+- **G05_tool3**: 5ms — keyword fallback (< 10ms)
+- **G06_missing**: 4ms — keyword fallback (< 10ms)
+- **G07_missing2**: 3ms — keyword fallback (< 10ms)
+- **G08_risky**: 4ms — keyword fallback (< 10ms)
+- **G09_risky2**: 5ms — keyword fallback (< 10ms)
+- **G10_risky3**: 4ms — keyword fallback (< 10ms)
+- **G11_risky4**: 5ms — keyword fallback (< 10ms)
+- **G12_error**: 4ms — keyword fallback (< 10ms)
+- **G13_error2**: 4ms — keyword fallback (< 10ms)
+- **G14_dead**: 2ms — keyword fallback (< 10ms)
+- **G15_mixed**: 4ms — keyword fallback (< 10ms)
 
 **Nhận xét:**
-- Latency từ **3ms** (keyword fallback) đến **221ms** (OpenAI LLM)
+- Latency từ **2ms** (keyword fallback) đến **217ms** (OpenAI LLM)
 - S01 dùng LLM classify vì không match keyword risky/tool rõ ràng
 - S02–S07 fallback sang keyword do môi trường test không có OPENAI_API_KEY → < 10ms
 
 ### 4.4 HITL Approval
 
-2 scenario kích hoạt approval path (S04, S06):
+7 scenario kích hoạt approval path (S04, S06):
 - `approval_observed = True` — approval node được gọi và ghi nhận decision
 - Mock mode: `mock-reviewer` tự động approve
 - Real HITL (`LANGGRAPH_INTERRUPT=true`): graph dừng tại `approval` node, chờ human quyết định qua Streamlit UI
