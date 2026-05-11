@@ -1,0 +1,69 @@
+============================================================
+TIME TRAVEL DEMO — get_state_history() + replay
+============================================================
+
+STEP 1: Run S05_error (retry loop → many checkpoints)
+----------------------------------------
+  route        : error
+  retries      : 4
+  nodes visited: ['intake', 'classify', 'retry', 'tool', 'evaluate', 'retry', 'tool', 'evaluate', 'answer', 'finalize', 'intake', 'classify', 'retry', 'tool', 'evaluate', 'retry', 'tool', 'evaluate', 'answer', 'finalize']
+
+STEP 2: State history — all checkpoints
+----------------------------------------
+  Total checkpoints: 31
+
+  [00] last=finalize           attempt=2  eval=success
+  [01] last=answer             attempt=2  eval=success
+  [02] last=evaluate           attempt=2  eval=success
+  [03] last=tool               attempt=2  eval=needs_retry
+  [04] last=retry              attempt=2  eval=needs_retry
+  [05] last=evaluate           attempt=1  eval=needs_retry
+  [06] last=tool               attempt=1  eval=None
+  [07] last=retry              attempt=1  eval=None
+  [08] last=classify           attempt=0  eval=None
+  [09] last=intake             attempt=0  eval=None
+  [10] last=finalize           attempt=0  eval=None
+  [11] last=finalize           attempt=2  eval=success
+  [12] last=finalize           attempt=2  eval=success
+  [13] last=answer             attempt=2  eval=success
+  [14] last=evaluate           attempt=2  eval=success
+  [15] last=tool               attempt=2  eval=needs_retry
+  [16] last=retry              attempt=2  eval=needs_retry
+  [17] last=evaluate           attempt=1  eval=needs_retry
+  [18] last=tool               attempt=1  eval=None
+  [19] last=finalize           attempt=2  eval=success
+  [20] last=answer             attempt=2  eval=success
+  [21] last=evaluate           attempt=2  eval=success
+  [22] last=tool               attempt=2  eval=needs_retry
+  [23] last=retry              attempt=2  eval=needs_retry
+  [24] last=evaluate           attempt=1  eval=needs_retry
+  [25] last=tool               attempt=1  eval=None
+  [26] last=retry              attempt=1  eval=None
+  [27] last=classify           attempt=0  eval=None
+  [28] last=intake             attempt=0  eval=None
+  [29] last=START              attempt=0  eval=None
+  [30] last=START              attempt=0  eval=—
+
+STEP 3: Time travel — pick intermediate checkpoint
+----------------------------------------
+  Selected checkpoint: attempt=1, nodes_so_far=['intake', 'classify', 'retry']
+
+STEP 4: Replay from selected checkpoint
+----------------------------------------
+  route         : error
+  nodes visited : ['intake', 'classify', 'retry', 'tool', 'evaluate', 'retry', 'tool', 'evaluate', 'answer', 'finalize']
+  final_answer  : Here is what I found: tool-result: scenario=S05_error attempt=2
+
+STEP 5: Compare original vs replayed
+----------------------------------------
+  original route  : error
+  replayed route  : error
+  routes match    : True
+  original nodes  : 20
+  replayed nodes  : 10
+
+  [OK] Time travel replay completed successfully!
+
+============================================================
+RESULT: PASS — get_state_history() + replay from past checkpoint works
+============================================================

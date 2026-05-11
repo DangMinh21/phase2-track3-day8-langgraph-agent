@@ -1,0 +1,55 @@
+============================================================
+CRASH-RESUME DEMO — SQLite Persistence
+============================================================
+
+STEP 1: First run (simulates pre-crash execution)
+----------------------------------------
+  thread_id    : demo-crash-resume-001
+  route        : risky
+  approval     : True
+  final_answer : Action approved by mock-reviewer. Result: CUSTOMER_DB: customer active | scenari
+  nodes visited: ['intake', 'classify', 'risky_action', 'approval', 'tool_dispatch', 'order_lookup', 'customer_lookup', 'evaluate', 'answer', 'finalize', 'intake', 'classify', 'risky_action', 'approval', 'tool_dispatch', 'order_lookup', 'customer_lookup', 'evaluate', 'answer', 'finalize']
+  checkpoints  : outputs/demo_crash_checkpoints.db
+
+STEP 2: Simulated crash — discarding graph instance
+----------------------------------------
+  [OK] Old graph instance discarded (process would restart here)
+
+STEP 3: Recovery — new graph with SAME SQLite file
+----------------------------------------
+  route        : risky
+  approval     : True
+  final_answer : Action approved by mock-reviewer. Result: CUSTOMER_DB: customer active | scenari
+  match route  : True
+  [OK] State successfully recovered from SQLite checkpoint!
+
+STEP 4: State history — intermediate checkpoints
+----------------------------------------
+  Total checkpoints saved: 22
+
+  [00] last_node=finalize         attempt=0  nodes_so_far=20
+  [01] last_node=answer           attempt=0  nodes_so_far=19
+  [02] last_node=evaluate         attempt=0  nodes_so_far=18
+  [03] last_node=customer_lookup  attempt=0  nodes_so_far=17
+  [04] last_node=tool_dispatch    attempt=0  nodes_so_far=15
+  [05] last_node=approval         attempt=0  nodes_so_far=14
+  [06] last_node=risky_action     attempt=0  nodes_so_far=13
+  [07] last_node=classify         attempt=0  nodes_so_far=12
+  [08] last_node=intake           attempt=0  nodes_so_far=11
+  [09] last_node=finalize         attempt=0  nodes_so_far=10
+  [10] last_node=finalize         attempt=0  nodes_so_far=10
+  [11] last_node=finalize         attempt=0  nodes_so_far=10
+  [12] last_node=answer           attempt=0  nodes_so_far=9
+  [13] last_node=evaluate         attempt=0  nodes_so_far=8
+  [14] last_node=customer_lookup  attempt=0  nodes_so_far=7
+  [15] last_node=tool_dispatch    attempt=0  nodes_so_far=5
+  [16] last_node=approval         attempt=0  nodes_so_far=4
+  [17] last_node=risky_action     attempt=0  nodes_so_far=3
+  [18] last_node=classify         attempt=0  nodes_so_far=2
+  [19] last_node=intake           attempt=0  nodes_so_far=1
+  [20] last_node=—                attempt=0  nodes_so_far=0
+  [21] last_node=—                attempt=0  nodes_so_far=0
+
+============================================================
+RESULT: PASS — SQLite persistence survives simulated restart
+============================================================

@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .state import AgentState, Route
 
 
 def route_after_classify(state: AgentState) -> str:
-    """Map classified route to the next graph node.
-
-    TODO(student): handle unknown routes safely and update tests for edge cases.
-    """
+    """Map classified route to the next graph node."""
     route = state.get("route", Route.SIMPLE.value)
     mapping = {
         Route.SIMPLE.value: "answer",
-        Route.TOOL.value: "tool",
+        Route.TOOL.value: "tool_dispatch",
         Route.MISSING_INFO.value: "clarify",
         Route.RISKY.value: "risky_action",
         Route.ERROR.value: "retry",
@@ -21,31 +20,31 @@ def route_after_classify(state: AgentState) -> str:
     return mapping.get(route, "answer")
 
 
-def route_after_retry(state: AgentState) -> str:
-    """Decide whether to retry, fallback, or dead-letter.
+def fan_out_to_sources(state: AgentState) -> list[Any]:
+    """Fan out to order_lookup and customer_lookup in parallel via Send()."""
+    from langgraph.types import Send  # lazy import — keeps module import-safe
 
-    TODO(student): implement bounded retry and dead-letter routing.
-    """
+    return [
+        Send("order_lookup", state),
+        Send("customer_lookup", state),
+    ]
+
+
+def route_after_retry(state: AgentState) -> str:
+    """Route to tool for retry, or dead_letter when max attempts reached."""
     if int(state.get("attempt", 0)) >= int(state.get("max_attempts", 3)):
         return "dead_letter"
     return "tool"
 
 
 def route_after_evaluate(state: AgentState) -> str:
-    """Decide whether tool result is satisfactory or needs retry.
-
-    This is the 'done?' check that enables retry loops — a key LangGraph advantage over LCEL.
-    TODO(student): replace heuristic with LLM-as-judge or structured validation.
-    """
+    """Route to retry when tool failed, or answer when satisfactory."""
     if state.get("evaluation_result") == "needs_retry":
         return "retry"
     return "answer"
 
 
 def route_after_approval(state: AgentState) -> str:
-    """Continue only if approved.
-
-    TODO(student): support reject/edit outcomes.
-    """
+    """Continue to tool_dispatch when approved, else ask for clarification."""
     approval = state.get("approval") or {}
-    return "tool" if approval.get("approved") else "clarify"
+    return "tool_dispatch" if approval.get("approved") else "clarify"

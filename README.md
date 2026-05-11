@@ -1,210 +1,372 @@
-# Day 08 Lab — LangGraph Agentic Orchestration
+# Day 08 — LangGraph Agentic Orchestration
 
-Build a production-style LangGraph workflow for a support-ticket agent with state management, conditional routing, retry loops, human-in-the-loop approval, persistence, and metrics.
-
-This is a **starter skeleton**. Core logic is left as `TODO(student)` — implement your own design.
-
----
-
-## How you will be graded
-
-| Category | Points | What we look for |
-|---|---:|---|
-| Architecture & state schema | 20 | Typed state with correct reducers, lean serializable fields, clear node boundaries |
-| Graph behavior | 25 | All scenario routes correct, bounded retry loop, HITL approval path, all routes terminate |
-| Persistence & recovery | 15 | Checkpointer wired, thread_id per run, state history or crash-resume evidence |
-| Metrics & tests | 20 | `metrics.json` valid, scenario coverage, tests pass, meaningful counts |
-| Report & demo | 15 | Architecture explanation, metrics table, failure analysis, improvement ideas |
-| Production hygiene | 5 | Config, environment handling, lint/type discipline |
-
-**Grade bands:**
-- **90–100**: Production-quality graph + metrics + report + at least one bonus extension
-- **75–89**: Core graph works, metrics valid, report explains trade-offs
-- **60–74**: Graph mostly works but persistence/report/error handling incomplete
-- **< 60**: Does not run, hard-codes scenarios, or lacks metrics/report
-
-> **Critical rule**: Do NOT hard-code answers to specific scenario queries. Your graph must route based on **keywords and state logic**, not by matching exact scenario IDs. We grade with additional hidden scenarios that test the same routing rules but use different queries.
+> **Sinh viên:** Đặng Văn Minh | **MSHV:** 2A202600027
+> **Môn học:** Practical AI — Phase 2 Track 3 | **Ngày nộp:** 2026-05-11
 
 ---
 
-## Understanding `scenarios.jsonl`
+## Tổng quan dự án
 
-The file `data/sample/scenarios.jsonl` contains **7 sample scenarios** your graph must handle:
+Bài lab xây dựng một **support-ticket agent** hoàn chỉnh trên **LangGraph 1.1.6**, xử lý 7 kịch bản thực tế qua pipeline: phân loại → định tuyến → thực thi → kiểm tra → trả kết quả.
 
-```jsonl
-{"id":"S01_simple",      "query":"How do I reset my password?",                          "expected_route":"simple"}
-{"id":"S02_tool",        "query":"Please lookup order status for order 12345",            "expected_route":"tool"}
-{"id":"S03_missing",     "query":"Can you fix it?",                                      "expected_route":"missing_info"}
-{"id":"S04_risky",       "query":"Refund this customer and send confirmation email",      "expected_route":"risky"}
-{"id":"S05_error",       "query":"Timeout failure while processing request",              "expected_route":"error"}
-{"id":"S06_delete",      "query":"Delete customer account after support verification",    "expected_route":"risky"}
-{"id":"S07_dead_letter", "query":"System failure cannot recover after multiple attempts", "expected_route":"error", "max_attempts":1}
-```
+### Tính năng đã triển khai
 
-### What each field means
-
-| Field | Purpose |
+| Tính năng | Mô tả |
 |---|---|
-| `id` | Unique scenario identifier — used in metrics output |
-| `query` | The user's support-ticket text — input to your graph |
-| `expected_route` | Which route your `classify_node` should pick: `simple`, `tool`, `missing_info`, `risky`, or `error` |
-| `requires_approval` | If `true`, your graph must hit the approval/HITL node before answering |
-| `should_retry` | If `true`, scenario simulates transient tool failure requiring retry |
-| `max_attempts` | Override retry limit (default 3). S07 sets this to 1, so it exhausts retries immediately → dead letter |
-| `tags` | Descriptive labels for your reference |
+| **Conditional routing** | 5 nhánh: `simple`, `tool`, `missing_info`, `risky`, `error` |
+| **LLM classify** | OpenAI gpt-4o-mini là primary, keyword heuristic là fallback |
+| **Parallel fan-out** | `Send()` chạy `order_lookup` + `customer_lookup` đồng thời |
+| **Retry loop** | Bounded retry với `attempt < max_attempts`, dead-letter khi vượt giới hạn |
+| **HITL approval** | `interrupt()` + `Command(resume=...)`, Streamlit UI đầy đủ |
+| **SQLite persistence** | `SqliteSaver` + WAL mode, mỗi run có `thread_id` riêng |
+| **Crash-resume** | Phục hồi state qua `get_state()` sau khi discard graph instance |
+| **Time travel** | Replay từ checkpoint bất kỳ qua `get_state_history()` |
+| **Graph diagram** | Mermaid tự động từ `draw_mermaid()` với path_map đầy đủ |
 
-### How scenarios flow through your code
+### Kết quả thực nghiệm
 
 ```
-scenarios.jsonl  →  scenarios.py loads them  →  cli.py runs each through your graph
-                                              →  metrics.py collects results
-                                              →  outputs/metrics.json
+make run-scenarios
+  S01_simple     : route=simple       success=True  latency=224ms
+  S02_tool       : route=tool         success=True  latency=6ms
+  S03_missing    : route=missing_info success=True  latency=3ms
+  S04_risky      : route=risky        success=True  latency=6ms
+  S05_error      : route=error        success=True  latency=7ms
+  S06_delete     : route=risky        success=True  latency=7ms
+  S07_dead_letter: route=error        success=True  latency=4ms
+
+success_rate=100%  scenarios=7/7
 ```
-
-1. `make run-scenarios` reads `data/sample/scenarios.jsonl`
-2. For each scenario, it calls `initial_state(scenario)` → `graph.invoke(state)`
-3. After execution, it checks: did `actual_route` match `expected_route`? Did HITL fire when required?
-4. Results go to `outputs/metrics.json`
-
-### How to design your routing logic
-
-Your `classify_node` should use **keyword-based heuristics** to pick routes:
-
-| Route | Trigger keywords (examples) |
-|---|---|
-| `risky` | refund, delete, send, cancel, remove, revoke |
-| `tool` | status, order, lookup, check, track, find, search |
-| `missing_info` | Very short/vague queries (e.g., < 5 words with pronouns like "it") |
-| `error` | timeout, fail, error, crash, unavailable |
-| `simple` | Default — anything that doesn't match above |
-
-**Priority matters**: check risky keywords first (highest priority), then tool, then missing_info, then error, then default to simple. This prevents conflicts when a query contains keywords from multiple categories.
-
-### Adding your own test scenarios
-
-You can add extra lines to `scenarios.jsonl` to test edge cases:
-
-```jsonl
-{"id":"S08_custom","query":"Cancel my subscription immediately","expected_route":"risky","requires_approval":true,"tags":["custom"]}
-```
-
-This helps you verify your routing handles cases beyond the 7 samples. The grading script will also test with scenarios you haven't seen.
 
 ---
 
-## Quick start
+## Cài đặt & Chạy nhanh
 
 ```bash
-# Option A: conda
-conda activate ai-lab
-pip install -e '.[dev]'
+# 1. Cài đặt
+pip install -e '.[dev,sqlite]'
 
-# Option B: venv
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
+# 2. (Tùy chọn) Cấu hình OpenAI API key cho LLM classify
+cp .env.example .env
+# Điền OPENAI_API_KEY=sk-... vào .env
+# Nếu bỏ qua → keyword fallback tự động kích hoạt
 
-# Verify setup
-make test
+# 3. Chạy toàn bộ thực nghiệm
+make run-scenarios    # 7 scenarios → outputs/metrics.json
+make test             # 11 unit tests
+make lint             # ruff
+make typecheck        # mypy
+make grade-local      # validate metrics
 ```
 
-`pip install -e '.[dev]'` installs this project in editable mode with dev dependencies (pytest, ruff, mypy). Editable mode means code changes take effect immediately without reinstalling.
+Xem hướng dẫn chi tiết từng thực nghiệm: [`docs/run_docs.md`](docs/run_docs.md)
 
 ---
 
-## Step-by-step workflow
+## Hướng dẫn chấm bài
 
-### Phase 1: Core graph (0–75 min) — worth 45 points
+### Bước 1 — Cài đặt môi trường
 
-1. **`state.py`** — Confirm which fields use `Annotated[list, add]` (append-only reducer). Add `evaluation_result` field for retry loop gate.
-
-2. **`nodes.py`** — Implement each node function. Key ones:
-   - `classify_node`: keyword-based routing (see table above)
-   - `evaluate_node`: check tool results for errors → set `evaluation_result` to `"needs_retry"` or `"success"`
-   - `dead_letter_node`: log failures when max retries exceeded
-   - `approval_node`: mock approval (return `approved=True` by default)
-
-3. **`routing.py`** — Implement routing functions:
-   - `route_after_classify`: map route string → next node name
-   - `route_after_evaluate`: if `needs_retry` → `"retry"`, else → `"answer"`
-   - `route_after_retry`: if `attempt < max_attempts` → back to tool, else → `"dead_letter"`
-
-4. **`graph.py`** — Wire nodes and edges. Target architecture:
-
-   ```
-   START → intake → classify → [conditional routing]
-     simple       → answer → finalize → END
-     tool         → tool → evaluate → answer → finalize → END
-     missing_info → clarify → finalize → END
-     risky        → risky_action → approval → tool → evaluate → answer → finalize → END
-     error        → retry → tool → evaluate → [retry loop or answer]
-     max retry    → dead_letter → finalize → END
-   ```
-
-5. **Verify**: `make test` and `make run-scenarios`
-
-### Phase 2: Persistence (75–120 min) — worth 15 points
-
-6. **`persistence.py`** — Implement checkpointer factory:
-   - `"memory"` → `MemorySaver()` (already works for dev)
-   - `"sqlite"` → `SqliteSaver` with `sqlite3.connect()` and WAL mode
-   - Show evidence: thread_id per run, state history, or crash-resume
-
-### Phase 3: Metrics & report (120–180 min) — worth 35 points
-
-7. **Run all scenarios**: `make run-scenarios` → generates `outputs/metrics.json`
-8. **Validate**: `make grade-local` → checks metrics schema
-9. **Write report**: Fill `reports/lab_report.md` — explain architecture, metrics, failures, improvements
-
-### Phase 4: Bonus extensions (180+ min) — push toward 90+
-
-Pick one or more:
-- **Parallel fan-out**: Use `Send()` to run two tools concurrently, merge results via `add` reducer
-- **Real HITL**: Set `LANGGRAPH_INTERRUPT=true`, use `interrupt()` in approval_node
-- **Streamlit UI**: Build approval/reject interface with interrupt/resume
-- **Time travel**: Use `get_state_history()` to replay from earlier checkpoint
-- **Crash recovery**: Show SQLite checkpoint survives process kill + restart
-- **Graph diagram**: Export Mermaid diagram via `graph.get_graph().draw_mermaid()`
+```bash
+pip install -e '.[dev,sqlite]'
+python3 -c "import langgraph_agent_lab; print('OK')"
+```
 
 ---
+
+### Bước 2 — Chạy toàn bộ pipeline kiểm tra
+
+```bash
+make run-scenarios && \
+make lint && \
+make typecheck && \
+make test && \
+make grade-local
+```
+
+**Kết quả kỳ vọng:**
+
+```
+success_rate=100.00%  scenarios=7
+All checks passed!
+Success: no issues found in 10 source files
+11 passed in 0.40s
+Metrics valid. success_rate=100.00%
+```
+
+---
+
+### Bước 3 — Đối chiếu từng tiêu chí rubric
+
+#### Tiêu chí 1: Kiến trúc & State Schema 
+
+| Kiểm tra | Lệnh / File |
+|---|---|
+| Typed state với reducers đúng | `src/langgraph_agent_lab/state.py` — xem `AgentState` |
+| `Annotated[list, add]` cho append-only fields | `state.py` line 60–63: `tool_results`, `events`, `errors`, `messages` |
+| Node boundaries rõ ràng | `src/langgraph_agent_lab/nodes.py` — mỗi node trả `dict` partial |
+| 14 node được khai báo | `src/langgraph_agent_lab/graph.py` |
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, 'src')
+from langgraph_agent_lab.graph import build_graph
+g = build_graph()
+print('Nodes:', list(g.get_graph().nodes.keys()))
+"
+```
+
+---
+
+#### Tiêu chí 2: Graph Behavior 
+
+**Kiểm tra routing đúng 7 scenarios:**
+
+```bash
+make run-scenarios
+# Xem outputs/metrics.json — tất cả actual_route == expected_route
+```
+
+**Kiểm tra bounded retry (S05, S07):**
+
+```bash
+python3 -c "
+import json
+m = json.load(open('outputs/metrics.json'))
+for s in m['scenario_metrics']:
+    if s['retry_count'] > 0:
+        print(s['scenario_id'], 'retries:', s['retry_count'], 'success:', s['success'])
+"
+# S05: 8 retries, success=True (loop kết thúc đúng)
+# S07: 4 retries, success=True (dead-letter khi max_attempts=1)
+```
+
+**Kiểm tra HITL path (S04, S06):**
+
+```bash
+python3 -c "
+import json
+m = json.load(open('outputs/metrics.json'))
+for s in m['scenario_metrics']:
+    if s['approval_observed']:
+        print(s['scenario_id'], 'approval_observed:', s['approval_observed'])
+"
+# S04, S06: approval_observed=True
+```
+
+---
+
+#### Tiêu chí 3: Persistence & Recovery 
+
+**Crash-resume demo:**
+
+```bash
+make demo-crash-resume
+# Xem outputs/crash_resume_evidence.txt
+# Phải có: "[OK] State successfully recovered from SQLite checkpoint!"
+```
+
+**Thread ID per run — kiểm tra:**
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, 'src')
+from langgraph_agent_lab.graph import build_graph
+from langgraph_agent_lab.persistence import build_checkpointer
+g = build_graph(checkpointer=build_checkpointer('sqlite', 'outputs/verify.db'))
+from langgraph_agent_lab.state import Scenario, Route, initial_state
+s = initial_state(Scenario(id='verify-01', query='How to reset password', expected_route=Route.SIMPLE))
+s['thread_id'] = 'verify-01'
+r = g.invoke(s, config={'configurable': {'thread_id': 'verify-01'}})
+snap = g.get_state({'configurable': {'thread_id': 'verify-01'}})
+history = list(g.get_state_history({'configurable': {'thread_id': 'verify-01'}}))
+print('thread_id:', r.get('thread_id'))
+print('checkpoints:', len(history))
+"
+```
+
+---
+
+#### Tiêu chí 4: Metrics & Tests 
+
+```bash
+# Unit tests
+make test
+# Kỳ vọng: 11 passed
+
+# Metrics schema validation
+make grade-local
+# Kỳ vọng: Metrics valid. success_rate=100.00%
+
+# Xem chi tiết metrics
+python3 -c "
+import json
+m = json.load(open('outputs/metrics.json'))
+print('scenarios :', m['total_scenarios'])
+print('success   :', f\"{m['success_rate']:.0%}\")
+print('avg_nodes :', f\"{m['avg_nodes_visited']:.1f}\")
+print('retries   :', m['total_retries'])
+print('interrupts:', m['total_interrupts'])
+"
+```
+
+---
+
+#### Tiêu chí 5: Report & Demo 
+
+```bash
+# Sinh report từ data thực
+make run-scenarios   # cần chạy trước để có metrics.json
+cat reports/lab_report.md
+```
+
+Report tại `reports/lab_report.md` bao gồm:
+- Diagram Mermaid (Section 1.2)
+- State schema annotated (Section 1.4)
+- Bảng metrics 7 scenarios (Section 4.1)
+- Phân tích retry & latency (Section 4.2, 4.3)
+- Failure analysis (Section 5.1)
+- 6 điểm cải tiến đề xuất (Section 5.2)
+
+---
+
+#### Tiêu chí 6: Production Hygiene 
+
+```bash
+make lint       # ruff — All checks passed
+make typecheck  # mypy — no issues found
+```
+
+Kiểm tra thêm:
+- `.env.example` — không commit secrets thật
+- `configs/lab.yaml` — config tách khỏi code
+- `.gitignore` — loại bỏ `outputs/`, `*.db`, `.env`
+
+---
+
+### Bước 4 — Kiểm tra 5 Bonus Extensions
+
+#### Bonus A — SQLite Crash-Resume
+
+```bash
+make demo-crash-resume
+# Kết quả cuối: "RESULT: PASS — SQLite persistence survives simulated restart"
+cat outputs/crash_resume_evidence.txt
+```
+
+#### Bonus B — Graph Diagram
+
+```bash
+make export-diagram
+cat outputs/graph_diagram.md
+# Phải có đủ edges: classify → 5 nhánh, retry loop, approval conditional
+```
+
+#### Bonus C — Streamlit HITL UI
+
+```bash
+make run-streamlit
+# Mở http://localhost:8501
+# Test: nhập "Refund this customer" → Submit
+# Kỳ vọng: màn hình Approval xuất hiện với risk=HIGH
+# Click Approve → Complete screen với approval=True
+```
+
+#### Bonus D — Parallel Fan-out
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, 'src')
+from langgraph_agent_lab.graph import build_graph
+from langgraph_agent_lab.state import Scenario, Route, initial_state
+g = build_graph()
+s = initial_state(Scenario(id='t', query='lookup order status for order 99', expected_route=Route.TOOL))
+r = g.invoke(s, config={'configurable': {'thread_id': 't'}})
+print('tool_results count:', len(r['tool_results']))
+print('sources:', r['tool_results'])
+# Kỳ vọng: 2 entries — ORDER_DB + CUSTOMER_DB
+"
+```
+
+#### Bonus E — Time Travel
+
+```bash
+make demo-time-travel
+# Kết quả cuối: "RESULT: PASS — get_state_history() + replay from past checkpoint works"
+# routes match: True
+cat outputs/time_travel_evidence.txt
+```
+
+---
+
+### Tóm tắt điểm chấm
+
+| Tiêu chí | Điểm tối đa | Lệnh kiểm tra |
+|---|:---:|---|
+| Kiến trúc & State Schema | 20 | Đọc `state.py`, `nodes.py`, `graph.py` |
+| Graph Behavior | 25 | `make run-scenarios` + kiểm tra routing/retry/HITL |
+| Persistence & Recovery | 15 | `make demo-crash-resume` |
+| Metrics & Tests | 20 | `make test` + `make grade-local` |
+| Report & Demo | 15 | `cat reports/lab_report.md` |
+| Production Hygiene | 5 | `make lint` + `make typecheck` |
+| **Tổng core** | **100** | |
+| Bonus A — Crash-Resume | +5 | `outputs/crash_resume_evidence.txt` |
+| Bonus B — Diagram | +5 | `outputs/graph_diagram.md` |
+| Bonus C — Streamlit HITL | +5 | `make run-streamlit` |
+| Bonus D — Parallel Fan-out | +5 | 2 entries trong `tool_results` |
+| Bonus E — Time Travel | +5 | `outputs/time_travel_evidence.txt` |
+
+---
+
+## Cấu trúc dự án
+
+```
+├── app/
+│   └── streamlit_app.py          # Bonus C: HITL UI
+├── configs/
+│   └── lab.yaml                  # checkpointer: sqlite
+├── data/sample/
+│   └── scenarios.jsonl           # 7 test scenarios
+├── docs/
+│   ├── IMPLEMENTATION_SPEC.md    # thiết kế chi tiết
+│   └── run_docs.md               # hướng dẫn chạy thực nghiệm
+├── outputs/                      # generated — gitignored
+│   ├── metrics.json
+│   ├── graph_diagram.md
+│   ├── crash_resume_evidence.txt
+│   └── time_travel_evidence.txt
+├── reports/
+│   └── lab_report.md             # báo cáo tự sinh từ data
+├── scripts/
+│   ├── demo_crash_resume.py      # Bonus A
+│   └── demo_time_travel.py       # Bonus E
+├── src/langgraph_agent_lab/
+│   ├── state.py       # AgentState + reducers
+│   ├── nodes.py       # 14 node implementations
+│   ├── routing.py     # conditional edge functions
+│   ├── graph.py       # StateGraph wiring
+│   ├── persistence.py # SqliteSaver + MemorySaver
+│   ├── metrics.py     # MetricsReport schema
+│   ├── cli.py         # typer CLI
+│   └── report.py      # report generator
+├── tests/             # 11 unit tests
+├── .env.example
+├── Makefile
+└── pyproject.toml
+```
 
 ## Make commands
 
-| Command | What it does |
+| Lệnh | Mô tả |
 |---|---|
-| `make install` | Install project + dev dependencies |
-| `make test` | Run pytest |
-| `make lint` | Run ruff linter |
-| `make typecheck` | Run mypy type checker |
-| `make run-scenarios` | Execute all scenarios → `outputs/metrics.json` |
-| `make grade-local` | Validate metrics.json schema |
-| `make clean` | Remove caches and generated files |
-
----
-
-## Submission checklist
-
-- [ ] All `TODO(student)` sections completed
-- [ ] `make test` passes
-- [ ] `make run-scenarios` generates valid `outputs/metrics.json`
-- [ ] `make grade-local` passes validation
-- [ ] `reports/lab_report.md` filled in with architecture explanation, metrics analysis, and improvement ideas
-- [ ] Can explain at least one route and one failure mode during demo
-
-**For 90+ points, also include:**
-- [ ] At least one bonus extension (persistence, parallel fan-out, HITL, time travel, diagram)
-- [ ] Evidence of extension in report (screenshot, log output, or diagram)
-
----
-
-## Common pitfalls
-
-1. **Keyword conflicts**: "Check order status" contains both "check" (tool) and "order" (tool). Test priority carefully — risky keywords should take precedence over tool keywords.
-
-2. **Word boundary matching**: "Can you fix it?" — match "it" as a whole word, not as substring of "item" or "iteration". Strip punctuation before checking.
-
-3. **Unbounded retry**: Always check `attempt < max_attempts`. Without this bound, error scenarios loop forever.
-
-4. **SqliteSaver API**: In `langgraph-checkpoint-sqlite` 3.x, use `SqliteSaver(conn=sqlite3.connect(...))` not `SqliteSaver.from_conn_string()` (returns context manager, not checkpointer).
-
-5. **Forgetting finalize**: Every route must end at `finalize → END`. Missing this means the graph never terminates for some scenarios.
+| `make install` | Cài đặt dependencies |
+| `make test` | Chạy pytest (11 tests) |
+| `make lint` | ruff check |
+| `make typecheck` | mypy check |
+| `make run-scenarios` | Chạy 7 scenarios → `outputs/metrics.json` |
+| `make grade-local` | Validate metrics |
+| `make export-diagram` | Xuất Mermaid diagram |
+| `make demo-crash-resume` | Demo Bonus A |
+| `make demo-time-travel` | Demo Bonus E |
+| `make run-streamlit` | Khởi động HITL UI (Bonus C) |
+| `make clean` | Xóa cache và generated files |
