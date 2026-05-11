@@ -35,7 +35,7 @@ outputs/*.db-wal
 outputs/*.db-shm
 
 # Reports — regenerated
-reports/
+# reports/
 
 # SQLite WAL/SHM files (bất kỳ vị trí nào)
 *.db-wal
